@@ -4,16 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import pathlib
+import re
 import shutil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import ebooklib
 from ebooklib import epub
+from lxml import etree
+from lxml import html as lhtml
 
 
 METADATA_FILENAME = "metadata.json"
+TEXT_CONTENT_ROOT = pathlib.Path("text")
+TEXT_META_ROOT = pathlib.Path("text_meta")
+TEXT_XHTML_ROOT = pathlib.Path("text_xhtml")
+
+PLACEHOLDER_TEMPLATE = "[[EPUB_HTML_BLOCK_{:04d}]]"
+PLACEHOLDER_PATTERN = re.compile(r"\[\[EPUB_HTML_BLOCK_\d{4}\]\]")
 
 TYPE_NAMES = {
     ebooklib.ITEM_DOCUMENT: "document",
@@ -38,6 +48,9 @@ CATEGORY_BY_TYPE = {
     "cover": "images",
     "vector": "images",
 }
+
+SPECIAL_MEDIA_TAGS = {"svg", "img", "image", "object", "iframe"}
+TEXT_IGNORE_TAGS = {"desc", "title"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,6 +151,131 @@ def classify_item(item: Any) -> str:
     return TYPE_NAMES.get(item.get_type(), "other")
 
 
+def _local_name(elem: etree._Element) -> str:
+    return etree.QName(elem).localname.lower()
+
+
+def _node_has_special_media(elem: etree._Element) -> bool:
+    for node in elem.iter():
+        if not isinstance(node.tag, str):
+            continue
+        if _local_name(node) in SPECIAL_MEDIA_TAGS:
+            return True
+    return False
+
+
+def _has_meaningful_text(elem: etree._Element) -> bool:
+    if elem.text and elem.text.strip():
+        if _local_name(elem) not in TEXT_IGNORE_TAGS:
+            return True
+    for node in elem.iter():
+        if node is elem:
+            continue
+        if node.text and node.text.strip():
+            if _local_name(node) not in TEXT_IGNORE_TAGS:
+                return True
+        if node.tail and node.tail.strip():
+            return True
+    return False
+
+
+def _should_extract_special_block(elem: etree._Element) -> bool:
+    if not isinstance(elem.tag, str):
+        return False
+    if not _node_has_special_media(elem):
+        return False
+    if _has_meaningful_text(elem):
+        return False
+    parent = elem.getparent()
+    while parent is not None and isinstance(parent.tag, str):
+        if _node_has_special_media(parent) and not _has_meaningful_text(parent):
+            return False
+        parent = parent.getparent()
+    return True
+
+
+def _sanitize_special_block(elem: etree._Element) -> str:
+    cloned = copy.deepcopy(elem)
+    for node in cloned.iter():
+        if not isinstance(node.tag, str):
+            continue
+        lname = _local_name(node)
+        attrs = list(node.attrib.items())
+        for key, value in attrs:
+            new_key = key
+            if lname == "svg":
+                lowered = key.lower()
+                if lowered == "viewbox":
+                    new_key = "viewBox"
+                elif lowered == "preserveaspectratio":
+                    new_key = "preserveAspectRatio"
+            if new_key != key:
+                del node.attrib[key]
+                node.attrib[new_key] = value
+    html_string = lhtml.tostring(cloned, encoding="unicode", method="html")
+    return html_string
+
+
+def _normalize_text_output(text: str) -> str:
+    text = text.replace("\r\n", "\n")
+    text = "\n".join(line.rstrip() for line in text.splitlines())
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _ensure_blank_after_title(text: str) -> str:
+    if not text:
+        return text
+    lines = text.splitlines()
+    if not lines:
+        return text
+    title = lines[0].rstrip()
+    rest = "\n".join(lines[1:])
+    rest = rest.lstrip("\n")
+    if rest:
+        return f"{title}\n\n{rest}"
+    return f"{title}\n"
+
+
+def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str]]]:
+    try:
+        tree = lhtml.fromstring(raw_content)
+    except etree.ParserError:
+        return raw_content.decode("utf-8", errors="ignore"), []
+    body = tree.find("body")
+    if body is None:
+        body = tree
+    extras: List[Dict[str, str]] = []
+    nodes = list(body.iter())
+    placeholder_counter = 1
+    for elem in nodes:
+        if not isinstance(elem.tag, str):
+            continue
+        if elem.getparent() is None and elem is not body:
+            continue
+        if not _should_extract_special_block(elem):
+            continue
+        placeholder = PLACEHOLDER_TEMPLATE.format(placeholder_counter)
+        placeholder_counter += 1
+        sanitized = _sanitize_special_block(elem)
+        extras.append({"placeholder": placeholder, "html": sanitized})
+        parent = elem.getparent()
+        if parent is None:
+            continue
+        replacement = etree.Element("p")
+        replacement.text = placeholder
+        replacement.tail = elem.tail
+        parent.replace(elem, replacement)
+    text_content = body.text_content() or ""
+    text_content = _normalize_text_output(text_content)
+    text_content = PLACEHOLDER_PATTERN.sub(
+        lambda match: f"\n\n{match.group(0)}\n\n", text_content
+    )
+    text_content = re.sub(r"\n{3,}", "\n\n", text_content).strip()
+    text_content = _ensure_blank_after_title(text_content)
+    return text_content, extras
+
+
 def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     for idx, item in enumerate(book.get_items()):
@@ -146,19 +284,39 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
         safe_rel = sanitize_relative_path(
             item.file_name or f"item_{idx}.bin", f"item_{idx}.bin"
         )
-        relative_path = pathlib.Path(category) / safe_rel
-        content = item.get_content()
-        target_path = out_dir / relative_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(content)
-
         properties = list(getattr(item, "properties", []) or [])
-        if (
-            type_name == "document"
-            and b"<svg" in content.lower()
-            and "svg" not in properties
-        ):
-            properties.append("svg")
+        content = item.get_content()
+        meta_rel_path: pathlib.Path | None = None
+
+        if type_name == "document":
+            relative_path = (TEXT_CONTENT_ROOT / safe_rel).with_suffix(".txt")
+            meta_rel_path = (TEXT_META_ROOT / safe_rel).with_suffix(".meta.json")
+            xhtml_rel_path = (TEXT_XHTML_ROOT / safe_rel).with_suffix(".xhtml")
+            text_output, extras = extract_text_and_extras(content)
+            text_target = out_dir / relative_path
+            text_target.parent.mkdir(parents=True, exist_ok=True)
+            text_target.write_text(text_output, encoding="utf-8")
+            xhtml_target = out_dir / xhtml_rel_path
+            xhtml_target.parent.mkdir(parents=True, exist_ok=True)
+            xhtml_target.write_bytes(content)
+            chapter_meta = {
+                "title": getattr(item, "title", None),
+                "lang": getattr(item, "lang", None),
+                "properties": properties,
+                "placeholders": extras,
+                "reference_xhtml": xhtml_rel_path.as_posix(),
+            }
+            meta_target = out_dir / meta_rel_path
+            meta_target.parent.mkdir(parents=True, exist_ok=True)
+            meta_target.write_text(
+                json.dumps(chapter_meta, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        else:
+            relative_path = pathlib.Path(category) / safe_rel
+            target_path = out_dir / relative_path
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(content)
 
         records.append(
             {
@@ -171,6 +329,9 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
                 "lang": getattr(item, "lang", None),
                 "properties": properties,
                 "relative_path": relative_path.as_posix(),
+                "meta_relative_path": meta_rel_path.as_posix()
+                if meta_rel_path
+                else None,
             }
         )
     return records
