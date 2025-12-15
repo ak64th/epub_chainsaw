@@ -118,20 +118,27 @@ def build_translated_chapters(
             logger.warning("UTF-8 decode error in %s; using replacement characters.", txt_path)
             original_text = txt_path.read_text(encoding="utf-8", errors="replace")
         translation_lines = load_translation(translations_dir, txt_path)
+        is_translated = translation_lines is not None
         if translation_lines is not None:
             text_to_use = apply_translation(original_text, translation_lines)
         else:
             text_to_use = original_text
         chapter_meta = load_chapter_meta(meta_path)
+        if is_translated:
+            chapter_lang = default_language
+        else:
+            chapter_lang = (
+                chapter_meta.get("lang")
+                or item.get("lang")
+                or default_language
+            )
         html_content = render_text_with_extras(
             text_to_use, chapter_meta.get("placeholders", [])
         )
         chapter = epub.EpubHtml(
             title=chapter_meta.get("title") or item.get("title") or item.get("file_name"),
             file_name=item.get("file_name"),
-            lang=chapter_meta.get("lang")
-            or item.get("lang")
-            or default_language,
+            lang=chapter_lang,
         )
         chapter.content = html_content
         item_id = item.get("id")
