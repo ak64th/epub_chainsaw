@@ -43,7 +43,7 @@ python build_translated_epub.py \
   --epubcheck /usr/bin/epubcheck
 ```
 
-- Place translations in the directory you pass via `--translations`. Files follow the pattern `<chapter>_translated.txt` (e.g., `0001__translated.txt`) and **must** keep the same number of lines (blank lines included) as the original txt file. The script compares line-by-line and substitutes translated lines when available; if a translation is missing or the counts mismatch, it logs a warning and falls back to the original text so the build never crashes.
+- Place translations in the directory you pass via `--translations`. Files follow the pattern `<chapter>_translated.txt` (e.g., `0001_.txt` to `0001__translated.txt`) and **must** keep the same number of lines (blank lines included) as the original txt file. The script compares line-by-line and substitutes translated lines when available; if a translation is missing or the counts mismatch, it logs a warning and falls back to the original text so the build never crashes.
 - `--language` defaults to `zh` but you can override it for other locales.
 - The tool reuses the placeholder metadata, so SVG/image blocks continue to convert into safe markup.
 
@@ -51,7 +51,13 @@ python build_translated_epub.py \
 
 1. `extract_epub.py --epub origin.epub --out-dir extracted_origin --force`
 2. Edit any files under `extracted_origin/text` (and their JSON sidecars if you need to tweak placeholder metadata). You can also update CSS or images.
-3. `build_epub.py --in-dir extracted_origin --output rebuilt_origin.epub --epubcheck /usr/bin/epubcheck`
-   or `build_translated_epub.py --in-dir extracted_origin --translations translated --output rebuilt_translated.epub --language zh --epubcheck /usr/bin/epubcheck`
-4. Inspect the generated EPUB or repeat steps 2-3 until the content looks right.
+3. **If you want a translation build:**
+   - Create a `translated/` directory (or any folder you will pass to `--translations`).
+   - For every chapter you translate, copy the original txt filename and append `_translated` before the extension (e.g., `0002_.txt` → `0002__translated.txt`).
+   - Keep the line count identical to the source file; blank lines are significant.
+   - Optionally change the title field of json file in `extracted_origin/text_meta`, builder will use it in the TOC.
+4. Run either:
+   - `build_epub.py --in-dir extracted_origin --output rebuilt_origin.epub --epubcheck /usr/bin/epubcheck`
+   - `build_translated_epub.py --in-dir extracted_origin --translations translated --output rebuilt_translated.epub --language zh --epubcheck /usr/bin/epubcheck`
+5. Inspect the generated EPUB or repeat the edit/build steps until everything looks right.
 
