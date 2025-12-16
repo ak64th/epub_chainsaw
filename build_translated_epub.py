@@ -26,8 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for building translated EPUB."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--in-dir", required=True, help="Directory produced by extract_epub.py")
+    parser.add_argument(
+        "--in-dir", required=True, help="Directory produced by extract_epub.py"
+    )
     parser.add_argument(
         "--translations",
         required=True,
@@ -35,7 +38,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", required=True, help="Destination EPUB file path")
     parser.add_argument("--title", help="Override title stored in metadata.json")
-    parser.add_argument("--identifier", help="Override identifier stored in metadata.json")
+    parser.add_argument(
+        "--identifier", help="Override identifier stored in metadata.json"
+    )
     parser.add_argument(
         "--language",
         default="zh",
@@ -46,7 +51,9 @@ def parse_args() -> argparse.Namespace:
         action="append",
         help="Author name. Repeat for multiple authors. Defaults to metadata.json entries.",
     )
-    parser.add_argument("--epubcheck", help="Path to epubcheck CLI binary to validate the output file")
+    parser.add_argument(
+        "--epubcheck", help="Path to epubcheck CLI binary to validate the output file"
+    )
     parser.add_argument(
         "--epubcheck-args",
         nargs=argparse.REMAINDER,
@@ -56,6 +63,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalized_translation_name(chapter_txt_path: pathlib.Path) -> str:
+    """Generate the expected translation filename for a given chapter text file."""
     stem = chapter_txt_path.stem
     return f"{stem}_translated.txt"
 
@@ -63,6 +71,7 @@ def normalized_translation_name(chapter_txt_path: pathlib.Path) -> str:
 def load_translation(
     translations_dir: pathlib.Path, chapter_txt_path: pathlib.Path
 ) -> Optional[List[str]]:
+    """Load translation file if it exists, returning lines or None if not found."""
     translation_file = translations_dir / normalized_translation_name(chapter_txt_path)
     if not translation_file.exists():
         return None
@@ -76,6 +85,7 @@ def load_translation(
 
 
 def apply_translation(original_text: str, translated_lines: List[str]) -> str:
+    """Merge translated lines with original text, line-by-line."""
     original_lines = original_text.splitlines()
     if len(original_lines) != len(translated_lines):
         logger.warning(
@@ -91,13 +101,14 @@ def apply_translation(original_text: str, translated_lines: List[str]) -> str:
     return "\n".join(merged_lines)
 
 
-def build_translated_chapters(
+def build_translated_chapters(  # pylint: disable=too-many-locals
     book: epub.EpubBook,
     metadata: Dict[str, Any],
     base_dir: pathlib.Path,
     translations_dir: pathlib.Path,
     default_language: str,
 ) -> Dict[str, epub.EpubHtml]:
+    """Build chapters with translations applied where available."""
     chapters: Dict[str, epub.EpubHtml] = {}
     for item in metadata.get("items", []):
         if item.get("type") != "document":
@@ -115,7 +126,9 @@ def build_translated_chapters(
         try:
             original_text = txt_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            logger.warning("UTF-8 decode error in %s; using replacement characters.", txt_path)
+            logger.warning(
+                "UTF-8 decode error in %s; using replacement characters.", txt_path
+            )
             original_text = txt_path.read_text(encoding="utf-8", errors="replace")
         translation_lines = load_translation(translations_dir, txt_path)
         is_translated = translation_lines is not None
@@ -128,15 +141,15 @@ def build_translated_chapters(
             chapter_lang = default_language
         else:
             chapter_lang = (
-                chapter_meta.get("lang")
-                or item.get("lang")
-                or default_language
+                chapter_meta.get("lang") or item.get("lang") or default_language
             )
         html_content = render_text_with_extras(
             text_to_use, chapter_meta.get("placeholders", [])
         )
         chapter = epub.EpubHtml(
-            title=chapter_meta.get("title") or item.get("title") or item.get("file_name"),
+            title=chapter_meta.get("title")
+            or item.get("title")
+            or item.get("file_name"),
             file_name=item.get("file_name"),
             lang=chapter_lang,
         )
@@ -158,6 +171,7 @@ def add_support_items(
     base_dir: pathlib.Path,
     book_language: str,
 ) -> None:
+    """Add non-document items (images, styles, etc.) to the book."""
     for item in metadata.get("items", []):
         if item.get("type") == "document":
             continue
@@ -165,6 +179,7 @@ def add_support_items(
 
 
 def main() -> None:
+    """Main entry point for building EPUB with translated chapters."""
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -220,4 +235,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(130)
-

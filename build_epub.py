@@ -26,18 +26,25 @@ XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for EPUB rebuilding."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--in-dir", required=True, help="Directory produced by extract_epub.py")
+    parser.add_argument(
+        "--in-dir", required=True, help="Directory produced by extract_epub.py"
+    )
     parser.add_argument("--output", required=True, help="Destination EPUB file path")
     parser.add_argument("--title", help="Override title stored in metadata.json")
-    parser.add_argument("--identifier", help="Override identifier stored in metadata.json")
+    parser.add_argument(
+        "--identifier", help="Override identifier stored in metadata.json"
+    )
     parser.add_argument("--language", help="Override language stored in metadata.json")
     parser.add_argument(
         "--author",
         action="append",
         help="Author name. Repeat for multiple authors. Defaults to metadata.json entries.",
     )
-    parser.add_argument("--epubcheck", help="Path to epubcheck CLI binary to validate the output file")
+    parser.add_argument(
+        "--epubcheck", help="Path to epubcheck CLI binary to validate the output file"
+    )
     parser.add_argument(
         "--epubcheck-args",
         nargs=argparse.REMAINDER,
@@ -47,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_metadata(base: pathlib.Path) -> Dict[str, Any]:
+    """Load and return metadata.json from the base directory."""
     metadata_path = base / METADATA_FILENAME
     if not metadata_path.exists():
         raise SystemExit(f"metadata file not found: {metadata_path}")
@@ -55,6 +63,7 @@ def load_metadata(base: pathlib.Path) -> Dict[str, Any]:
 
 
 def load_chapter_meta(meta_path: pathlib.Path) -> Dict[str, Any]:
+    """Load and return chapter metadata from a .meta.json file."""
     if not meta_path.exists():
         raise SystemExit(f"Chapter metadata not found: {meta_path}")
     with meta_path.open("r", encoding="utf-8") as fh:
@@ -86,6 +95,7 @@ def _chunk_to_html_blocks(chunk: str) -> List[str]:
 
 
 def render_text_with_extras(text: str, placeholders_meta: List[Dict[str, str]]) -> str:
+    """Convert plain text with placeholders into HTML, replacing them with HTML content."""
     text = text.replace("\r\n", "\n")
     placeholder_map = {
         entry["placeholder"]: entry["html"]
@@ -108,6 +118,7 @@ def render_text_with_extras(text: str, placeholders_meta: List[Dict[str, str]]) 
 
 
 def _local_name(elem: etree._Element) -> str:
+    # pylint: disable=no-member
     return etree.QName(elem).localname.lower()
 
 
@@ -147,6 +158,7 @@ def _svg_image_to_img(svg_elem: etree._Element) -> etree._Element | None:
 
 
 def normalize_placeholder_html(html_snippet: str) -> str:
+    """Normalize HTML snippets by converting SVG elements to img tags where appropriate."""
     try:
         parent = lhtml.fragment_fromstring(html_snippet, create_parent=True)
     except etree.ParserError:
@@ -167,7 +179,13 @@ def normalize_placeholder_html(html_snippet: str) -> str:
     )
 
 
-def create_item(book: epub.EpubBook, base: pathlib.Path, item_meta: Dict[str, Any], book_language: str) -> Any:
+def create_item(  # pylint: disable=too-many-locals
+    book: epub.EpubBook,
+    base: pathlib.Path,
+    item_meta: Dict[str, Any],
+    book_language: str,
+) -> Any:
+    """Create and add an EPUB item (chapter or asset) to the book from extracted metadata."""
     relative_path = item_meta.get("relative_path")
     if not relative_path:
         raise SystemExit(f"Item missing relative path: {item_meta}")
@@ -195,9 +213,7 @@ def create_item(book: epub.EpubBook, base: pathlib.Path, item_meta: Dict[str, An
             or item_meta.get("title")
             or item_meta.get("file_name"),
             file_name=item_meta.get("file_name"),
-            lang=chapter_meta.get("lang")
-            or item_meta.get("lang")
-            or book_language,
+            lang=chapter_meta.get("lang") or item_meta.get("lang") or book_language,
         )
         chapter.content = html_content
         if item_id:
@@ -227,7 +243,10 @@ def create_item(book: epub.EpubBook, base: pathlib.Path, item_meta: Dict[str, An
     return generic
 
 
-def build_chapters(book: epub.EpubBook, metadata: Dict[str, Any], base: pathlib.Path) -> Dict[str, epub.EpubHtml]:
+def build_chapters(
+    book: epub.EpubBook, metadata: Dict[str, Any], base: pathlib.Path
+) -> Dict[str, epub.EpubHtml]:
+    """Build all chapters from metadata and add them to the book."""
     chapters: Dict[str, epub.EpubHtml] = {}
     language = metadata.get("language") or "en"
     for item in metadata.get("items", []):
@@ -237,9 +256,13 @@ def build_chapters(book: epub.EpubBook, metadata: Dict[str, Any], base: pathlib.
     return chapters
 
 
-def build_toc(entries: List[Dict[str, Any]], chapters: Dict[str, epub.EpubHtml]) -> List[Any]:
-    def _convert(entry: Dict[str, Any]) -> Any:
-        children = [ _convert(child) for child in entry.get("children", []) ]
+def build_toc(
+    entries: List[Dict[str, Any]], chapters: Dict[str, epub.EpubHtml]
+) -> List[Any]:
+    """Build the table of contents structure from metadata entries."""
+
+    def _convert(entry: Dict[str, Any]) -> Any:  # pylint: disable=too-many-return-statements
+        children = [_convert(child) for child in entry.get("children", [])]
         kind = entry.get("kind")
 
         if kind == "section":
@@ -271,7 +294,10 @@ def build_toc(entries: List[Dict[str, Any]], chapters: Dict[str, epub.EpubHtml])
     return [_convert(entry) for entry in entries] if entries else []
 
 
-def build_spine(spine_entries: List[str], chapters: Dict[str, epub.EpubHtml]) -> List[Any]:
+def build_spine(
+    spine_entries: List[str], chapters: Dict[str, epub.EpubHtml]
+) -> List[Any]:
+    """Build the spine (reading order) from metadata entries."""
     id_lookup = {
         getattr(chapter, "id", None): chapter
         for chapter in chapters.values()
@@ -289,7 +315,10 @@ def build_spine(spine_entries: List[str], chapters: Dict[str, epub.EpubHtml]) ->
     return spine
 
 
-def configure_metadata(book: epub.EpubBook, metadata: Dict[str, Any], args: argparse.Namespace) -> None:
+def configure_metadata(
+    book: epub.EpubBook, metadata: Dict[str, Any], args: argparse.Namespace
+) -> None:
+    """Configure book metadata (title, author, language, identifier)."""
     identifier = args.identifier or metadata.get("identifier") or "book-id"
     title = args.title or metadata.get("title") or pathlib.Path(args.output).stem
     language = args.language or metadata.get("language") or "en"
@@ -302,16 +331,22 @@ def configure_metadata(book: epub.EpubBook, metadata: Dict[str, Any], args: argp
         book.add_author(author)
 
 
-def run_epubcheck(epubcheck: str, additional_args: List[str], output_path: pathlib.Path) -> None:
+def run_epubcheck(
+    epubcheck: str, additional_args: List[str], output_path: pathlib.Path
+) -> None:
+    """Run epubcheck validation on the output EPUB file."""
     cmd = [epubcheck, *(additional_args or []), str(output_path)]
     print(f"Running epubcheck: {' '.join(cmd)}")
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    result = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False
+    )
     print(result.stdout)
     if result.returncode != 0:
         raise SystemExit(f"epubcheck failed with exit code {result.returncode}")
 
 
 def main() -> None:
+    """Main entry point for rebuilding an EPUB from extracted assets."""
     args = parse_args()
     base_dir = pathlib.Path(args.in_dir).expanduser().resolve()
     output_path = pathlib.Path(args.output).expanduser().resolve()
@@ -347,4 +382,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         sys.exit(130)
-

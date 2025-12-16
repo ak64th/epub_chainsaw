@@ -54,6 +54,7 @@ TEXT_IGNORE_TAGS = {"desc", "title"}
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for EPUB extraction."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epub", required=True, help="Path to the source EPUB file.")
     parser.add_argument(
@@ -70,6 +71,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def ensure_output_dir(target: pathlib.Path, force: bool) -> None:
+    """Ensure output directory exists, optionally removing it first if force is True."""
     if target.exists():
         if not force and any(target.iterdir()):
             raise SystemExit(
@@ -82,10 +84,12 @@ def ensure_output_dir(target: pathlib.Path, force: bool) -> None:
 
 
 def first_meta(values: List[Any]) -> Any:
+    """Extract the first metadata value from a list of (value, attrs) tuples."""
     return values[0][0] if values else None
 
 
 def sanitize_relative_path(name: str, fallback: str) -> pathlib.Path:
+    """Sanitize a relative path by removing dangerous components like '..'."""
     pure = pathlib.PurePosixPath(name or fallback)
     filtered = [part for part in pure.parts if part not in ("..", "", ".")]
     if not filtered:
@@ -94,6 +98,7 @@ def sanitize_relative_path(name: str, fallback: str) -> pathlib.Path:
 
 
 def serialize_toc(entries: Any) -> List[Dict[str, Any]]:
+    """Convert EPUB table of contents to JSON-serializable format."""
     if not entries:
         return []
     return [_serialize_toc_entry(entry) for entry in entries]
@@ -132,6 +137,7 @@ def _serialize_toc_entry(entry: Any) -> Dict[str, Any]:
 
 
 def serialize_spine(spine_entries: List[Any]) -> List[str]:
+    """Convert EPUB spine to a list of string identifiers."""
     serialized = []
     for entry in spine_entries:
         if isinstance(entry, epub.EpubHtml):
@@ -144,6 +150,7 @@ def serialize_spine(spine_entries: List[Any]) -> List[str]:
 
 
 def classify_item(item: Any) -> str:
+    """Classify an EPUB item by type (document, image, style, etc.)."""
     if isinstance(item, epub.EpubNcx):
         return "ncx"
     if isinstance(item, epub.EpubNav):
@@ -152,6 +159,7 @@ def classify_item(item: Any) -> str:
 
 
 def _local_name(elem: etree._Element) -> str:
+    # pylint: disable=no-member
     return etree.QName(elem).localname.lower()
 
 
@@ -238,6 +246,7 @@ def _ensure_blank_after_title(text: str) -> str:
 
 
 def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str]]]:
+    """Extract plain text and special HTML blocks (images, SVG) from chapter content."""
     try:
         tree = lhtml.fromstring(raw_content)
     except etree.ParserError:
@@ -276,7 +285,8 @@ def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str
     return text_content, extras
 
 
-def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, Any]]:
+def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, Any]]:  # pylint: disable=too-many-locals
+    """Extract all items from EPUB to files and return metadata records."""
     records: List[Dict[str, Any]] = []
     for idx, item in enumerate(book.get_items()):
         type_name = classify_item(item)
@@ -320,7 +330,8 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
 
         records.append(
             {
-                "id": getattr(item, "get_id", lambda: None)() or getattr(item, "id", None),
+                "id": getattr(item, "get_id", lambda: None)()
+                or getattr(item, "id", None),
                 "file_name": item.file_name or safe_rel.as_posix(),
                 "media_type": getattr(item, "media_type", None),
                 "type": type_name,
@@ -338,6 +349,7 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
 
 
 def build_metadata(book: epub.EpubBook, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build complete metadata dictionary from EPUB book and extracted items."""
     metadata: Dict[str, Any] = {
         "identifier": first_meta(book.get_metadata("DC", "identifier")),
         "title": first_meta(book.get_metadata("DC", "title")),
@@ -351,12 +363,14 @@ def build_metadata(book: epub.EpubBook, items: List[Dict[str, Any]]) -> Dict[str
 
 
 def dump_metadata(metadata: Dict[str, Any], out_dir: pathlib.Path) -> None:
+    """Write metadata to metadata.json file."""
     metadata_path = out_dir / METADATA_FILENAME
     with metadata_path.open("w", encoding="utf-8") as fh:
         json.dump(metadata, fh, indent=2, ensure_ascii=False)
 
 
 def main() -> None:
+    """Main entry point for extracting EPUB contents."""
     args = parse_args()
     epub_path = pathlib.Path(args.epub).expanduser().resolve()
     out_dir = pathlib.Path(args.out_dir).expanduser().resolve()
@@ -372,4 +386,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

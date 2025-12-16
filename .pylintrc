@@ -1,0 +1,23 @@
+[MAIN]
+
+# Specify a list of packages or modules to whitelist for importing C extensions
+extension-pkg-allow-list=lxml
+
+[MESSAGES CONTROL]
+
+# Disable duplicate-code checks as the shared patterns are intentional
+disable=duplicate-code
+
+[FORMAT]
+
+# Maximum number of characters on a single line
+max-line-length=100
+
+[DESIGN]
+
+# Maximum number of local variables for function / method body
+max-locals=21
+
+# Maximum number of return statements
+max-returns=7
+
