@@ -230,7 +230,6 @@ def _sanitize_special_block(elem: etree._Element) -> str:
             if new_key != key:
                 del node.attrib[key]
                 node.attrib[new_key] = value
-    # type: ignore[assignment]
     html_string: str = lhtml.tostring(cloned, encoding="unicode", method="html")
     return html_string
 
@@ -259,12 +258,11 @@ def _ensure_blank_after_title(text: str) -> str:
 def extract_text_and_extras(raw_content: bytes) -> tuple[str, list[PlaceholderBlock]]:
     """Extract plain text and special HTML blocks (images, SVG) from chapter content."""
     try:
-        tree = lhtml.fromstring(raw_content)
+        tree: lhtml.HtmlElement = lhtml.fromstring(raw_content)
     except etree.ParserError:
         return raw_content.decode("utf-8", errors="ignore"), []
-    body = tree.find("body")
-    if body is None:
-        body = tree
+    body_elem = tree.find("body")
+    body: lhtml.HtmlElement = body_elem if body_elem is not None else tree
     extras: list[PlaceholderBlock] = []
     nodes = list(body.iter())
     placeholder_counter = 1
@@ -286,7 +284,7 @@ def extract_text_and_extras(raw_content: bytes) -> tuple[str, list[PlaceholderBl
         replacement.text = placeholder
         replacement.tail = elem.tail
         parent.replace(elem, replacement)
-    text_content = body.text_content() or ""  # type: ignore[attr-defined]
+    text_content = body.text_content() or ""
     text_content = _normalize_text_output(text_content)
     text_content = PLACEHOLDER_PATTERN.sub(
         lambda match: f"\n\n{match.group(0)}\n\n", text_content
