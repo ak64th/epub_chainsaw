@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TypedDict, Union
+from typing import Union
+from typing_extensions import TypedDict
 from ebooklib import epub
 
 
@@ -67,20 +68,14 @@ class Metadata(TypedDict, total=False):
 
 # Type aliases for ebooklib structures before serialization
 
+# TOC entry can be a Section, Link, EpubHtml, or nested tuple structure
+# Used both when extracting from EPUB and when reconstructing from serialized data
 TocEntry = Union[
     epub.Section,
     epub.Link,
     epub.EpubHtml,
     tuple["TocEntry", tuple["TocEntry", ...]],
-]
-
-# Reconstructed TOC element after building from serialized TocNode
-TocElement = Union[
-    epub.Section,
-    epub.Link,
-    epub.EpubHtml,
-    tuple[Union[epub.Section, epub.Link, epub.EpubHtml], tuple[object, ...]],
-    str,
+    str,  # Fallback for unknown entry types
 ]
 
 SpineEntry = Union[epub.EpubHtml, tuple[str, str], str]

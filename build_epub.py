@@ -20,7 +20,7 @@ from epub_types import (
     ItemRecord,
     Metadata,
     PlaceholderBlock,
-    TocElement,
+    TocEntry,
     TocNode,
 )
 
@@ -268,10 +268,10 @@ def build_chapters(
 
 def build_toc(
     entries: list[TocNode], chapters: dict[str, epub.EpubHtml]
-) -> list[TocElement]:
+) -> list[TocEntry]:
     """Build the table of contents structure from metadata entries."""
 
-    def _convert(entry: TocNode) -> TocElement:  # pylint: disable=too-many-return-statements
+    def _convert(entry: TocNode) -> TocEntry:  # pylint: disable=too-many-return-statements
         children = [_convert(child) for child in entry.get("children", [])]
         kind = entry.get("kind")
 
