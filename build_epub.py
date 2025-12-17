@@ -10,6 +10,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from typing import cast
 
 from ebooklib import epub
 from lxml import etree
@@ -67,7 +68,7 @@ def load_metadata(base: pathlib.Path) -> Metadata:
     if not metadata_path.exists():
         raise SystemExit(f"metadata file not found: {metadata_path}")
     with metadata_path.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+        return cast(Metadata, json.load(fh))
 
 
 def load_chapter_meta(meta_path: pathlib.Path) -> ChapterMetadata:
@@ -75,7 +76,7 @@ def load_chapter_meta(meta_path: pathlib.Path) -> ChapterMetadata:
     if not meta_path.exists():
         raise SystemExit(f"Chapter metadata not found: {meta_path}")
     with meta_path.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+        return cast(ChapterMetadata, json.load(fh))
 
 
 def _split_paragraphs(chunk: str) -> list[str]:
@@ -152,8 +153,9 @@ def _svg_image_to_img(svg_elem: etree._Element) -> etree._Element | None:
     new_img = etree.Element("img")
     new_img.set("src", href)
     for attr in ("width", "height"):
-        if image_elem.get(attr):
-            new_img.set(attr, image_elem.get(attr))
+        value = image_elem.get(attr)
+        if value:
+            new_img.set(attr, value)
     desc_text = None
     for node in svg_elem.iter():
         if not isinstance(node.tag, str):
@@ -280,6 +282,8 @@ def build_toc(
             return (section, tuple(children))
         if kind == "html":
             file_name = entry.get("file_name")
+            if not file_name:
+                raise SystemExit(f"TOC html entry missing file_name: {entry}")
             chapter = chapters.get(file_name)
             if chapter is None:
                 raise SystemExit(f"TOC references unknown chapter: {file_name}")
