@@ -10,11 +10,19 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Any, Dict, List
 
 from ebooklib import epub
 from lxml import etree
 from lxml import html as lhtml
+
+from epub_types import (
+    ChapterMetadata,
+    ItemRecord,
+    Metadata,
+    PlaceholderBlock,
+    TocElement,
+    TocNode,
+)
 
 METADATA_FILENAME = "metadata.json"
 
@@ -53,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_metadata(base: pathlib.Path) -> Dict[str, Any]:
+def load_metadata(base: pathlib.Path) -> Metadata:
     """Load and return metadata.json from the base directory."""
     metadata_path = base / METADATA_FILENAME
     if not metadata_path.exists():
@@ -62,7 +70,7 @@ def load_metadata(base: pathlib.Path) -> Dict[str, Any]:
         return json.load(fh)
 
 
-def load_chapter_meta(meta_path: pathlib.Path) -> Dict[str, Any]:
+def load_chapter_meta(meta_path: pathlib.Path) -> ChapterMetadata:
     """Load and return chapter metadata from a .meta.json file."""
     if not meta_path.exists():
         raise SystemExit(f"Chapter metadata not found: {meta_path}")
@@ -70,12 +78,12 @@ def load_chapter_meta(meta_path: pathlib.Path) -> Dict[str, Any]:
         return json.load(fh)
 
 
-def _split_paragraphs(chunk: str) -> List[str]:
+def _split_paragraphs(chunk: str) -> list[str]:
     normalized = chunk.replace("\r\n", "\n")
     if not normalized.strip():
         return []
     parts = re.split(r"\n\s*\n", normalized)
-    paragraphs: List[str] = []
+    paragraphs: list[str] = []
     for part in parts:
         trimmed = part.strip("\n")
         if trimmed.strip():
@@ -90,11 +98,13 @@ def _paragraph_to_html(paragraph: str) -> str:
     return f"<p>{body}</p>"
 
 
-def _chunk_to_html_blocks(chunk: str) -> List[str]:
+def _chunk_to_html_blocks(chunk: str) -> list[str]:
     return [_paragraph_to_html(paragraph) for paragraph in _split_paragraphs(chunk)]
 
 
-def render_text_with_extras(text: str, placeholders_meta: List[Dict[str, str]]) -> str:
+def render_text_with_extras(
+    text: str, placeholders_meta: list[PlaceholderBlock]
+) -> str:
     """Convert plain text with placeholders into HTML, replacing them with HTML content."""
     text = text.replace("\r\n", "\n")
     placeholder_map = {
@@ -102,7 +112,7 @@ def render_text_with_extras(text: str, placeholders_meta: List[Dict[str, str]]) 
         for entry in placeholders_meta
         if entry.get("placeholder") and entry.get("html")
     }
-    blocks: List[str] = []
+    blocks: list[str] = []
     cursor = 0
     for match in PLACEHOLDER_PATTERN.finditer(text):
         chunk = text[cursor : match.start()]
@@ -182,9 +192,9 @@ def normalize_placeholder_html(html_snippet: str) -> str:
 def create_item(  # pylint: disable=too-many-locals
     book: epub.EpubBook,
     base: pathlib.Path,
-    item_meta: Dict[str, Any],
+    item_meta: ItemRecord,
     book_language: str,
-) -> Any:
+) -> epub.EpubHtml | epub.EpubItem | None:
     """Create and add an EPUB item (chapter or asset) to the book from extracted metadata."""
     relative_path = item_meta.get("relative_path")
     if not relative_path:
@@ -244,10 +254,10 @@ def create_item(  # pylint: disable=too-many-locals
 
 
 def build_chapters(
-    book: epub.EpubBook, metadata: Dict[str, Any], base: pathlib.Path
-) -> Dict[str, epub.EpubHtml]:
+    book: epub.EpubBook, metadata: Metadata, base: pathlib.Path
+) -> dict[str, epub.EpubHtml]:
     """Build all chapters from metadata and add them to the book."""
-    chapters: Dict[str, epub.EpubHtml] = {}
+    chapters: dict[str, epub.EpubHtml] = {}
     language = metadata.get("language") or "en"
     for item in metadata.get("items", []):
         created = create_item(book, base, item, language)
@@ -257,11 +267,11 @@ def build_chapters(
 
 
 def build_toc(
-    entries: List[Dict[str, Any]], chapters: Dict[str, epub.EpubHtml]
-) -> List[Any]:
+    entries: list[TocNode], chapters: dict[str, epub.EpubHtml]
+) -> list[TocElement]:
     """Build the table of contents structure from metadata entries."""
 
-    def _convert(entry: Dict[str, Any]) -> Any:  # pylint: disable=too-many-return-statements
+    def _convert(entry: TocNode) -> TocElement:  # pylint: disable=too-many-return-statements
         children = [_convert(child) for child in entry.get("children", [])]
         kind = entry.get("kind")
 
@@ -295,15 +305,15 @@ def build_toc(
 
 
 def build_spine(
-    spine_entries: List[str], chapters: Dict[str, epub.EpubHtml]
-) -> List[Any]:
+    spine_entries: list[str], chapters: dict[str, epub.EpubHtml]
+) -> list[epub.EpubHtml | str]:
     """Build the spine (reading order) from metadata entries."""
     id_lookup = {
         getattr(chapter, "id", None): chapter
         for chapter in chapters.values()
         if getattr(chapter, "id", None)
     }
-    spine: List[Any] = []
+    spine: list[epub.EpubHtml | str] = []
     for entry in spine_entries:
         if entry == "nav":
             spine.append("nav")
@@ -316,7 +326,7 @@ def build_spine(
 
 
 def configure_metadata(
-    book: epub.EpubBook, metadata: Dict[str, Any], args: argparse.Namespace
+    book: epub.EpubBook, metadata: Metadata, args: argparse.Namespace
 ) -> None:
     """Configure book metadata (title, author, language, identifier)."""
     identifier = args.identifier or metadata.get("identifier") or "book-id"
@@ -332,7 +342,7 @@ def configure_metadata(
 
 
 def run_epubcheck(
-    epubcheck: str, additional_args: List[str], output_path: pathlib.Path
+    epubcheck: str, additional_args: list[str], output_path: pathlib.Path
 ) -> None:
     """Run epubcheck validation on the output EPUB file."""
     cmd = [epubcheck, *(additional_args or []), str(output_path)]

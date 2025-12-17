@@ -9,12 +9,20 @@ import json
 import pathlib
 import re
 import shutil
-from typing import Any, Dict, List, Tuple
 
 import ebooklib
 from ebooklib import epub
 from lxml import etree
 from lxml import html as lhtml
+
+from epub_types import (
+    ChapterMetadata,
+    ItemRecord,
+    Metadata,
+    PlaceholderBlock,
+    TocEntry,
+    TocNode,
+)
 
 
 METADATA_FILENAME = "metadata.json"
@@ -83,7 +91,7 @@ def ensure_output_dir(target: pathlib.Path, force: bool) -> None:
     target.mkdir(parents=True, exist_ok=True)
 
 
-def first_meta(values: List[Any]) -> Any:
+def first_meta(values: list[tuple[str, dict[str, str]]]) -> str | None:
     """Extract the first metadata value from a list of (value, attrs) tuples."""
     return values[0][0] if values else None
 
@@ -97,15 +105,15 @@ def sanitize_relative_path(name: str, fallback: str) -> pathlib.Path:
     return pathlib.Path(*filtered)
 
 
-def serialize_toc(entries: Any) -> List[Dict[str, Any]]:
+def serialize_toc(entries: list[TocEntry] | tuple[TocEntry, ...]) -> list[TocNode]:
     """Convert EPUB table of contents to JSON-serializable format."""
     if not entries:
         return []
     return [_serialize_toc_entry(entry) for entry in entries]
 
 
-def _serialize_toc_entry(entry: Any) -> Dict[str, Any]:
-    node: Dict[str, Any]
+def _serialize_toc_entry(entry: TocEntry) -> TocNode:
+    node: TocNode
     if isinstance(entry, tuple) and len(entry) == 2:
         node = _serialize_toc_entry(entry[0])
         node["children"] = [_serialize_toc_entry(item) for item in entry[1]]
@@ -136,7 +144,9 @@ def _serialize_toc_entry(entry: Any) -> Dict[str, Any]:
     return node
 
 
-def serialize_spine(spine_entries: List[Any]) -> List[str]:
+def serialize_spine(
+    spine_entries: list[epub.EpubHtml | tuple[str, str] | str],
+) -> list[str]:
     """Convert EPUB spine to a list of string identifiers."""
     serialized = []
     for entry in spine_entries:
@@ -149,7 +159,7 @@ def serialize_spine(spine_entries: List[Any]) -> List[str]:
     return serialized
 
 
-def classify_item(item: Any) -> str:
+def classify_item(item: epub.EpubItem) -> str:
     """Classify an EPUB item by type (document, image, style, etc.)."""
     if isinstance(item, epub.EpubNcx):
         return "ncx"
@@ -245,7 +255,7 @@ def _ensure_blank_after_title(text: str) -> str:
     return f"{title}\n"
 
 
-def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str]]]:
+def extract_text_and_extras(raw_content: bytes) -> tuple[str, list[PlaceholderBlock]]:
     """Extract plain text and special HTML blocks (images, SVG) from chapter content."""
     try:
         tree = lhtml.fromstring(raw_content)
@@ -254,7 +264,7 @@ def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str
     body = tree.find("body")
     if body is None:
         body = tree
-    extras: List[Dict[str, str]] = []
+    extras: list[PlaceholderBlock] = []
     nodes = list(body.iter())
     placeholder_counter = 1
     for elem in nodes:
@@ -285,9 +295,9 @@ def extract_text_and_extras(raw_content: bytes) -> Tuple[str, List[Dict[str, str
     return text_content, extras
 
 
-def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, Any]]:  # pylint: disable=too-many-locals
+def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> list[ItemRecord]:  # pylint: disable=too-many-locals
     """Extract all items from EPUB to files and return metadata records."""
-    records: List[Dict[str, Any]] = []
+    records: list[ItemRecord] = []
     for idx, item in enumerate(book.get_items()):
         type_name = classify_item(item)
         category = CATEGORY_BY_TYPE.get(type_name, "misc")
@@ -309,7 +319,7 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
             xhtml_target = out_dir / xhtml_rel_path
             xhtml_target.parent.mkdir(parents=True, exist_ok=True)
             xhtml_target.write_bytes(content)
-            chapter_meta = {
+            chapter_meta: ChapterMetadata = {
                 "title": getattr(item, "title", None),
                 "lang": getattr(item, "lang", None),
                 "properties": properties,
@@ -348,9 +358,9 @@ def extract_items(book: epub.EpubBook, out_dir: pathlib.Path) -> List[Dict[str, 
     return records
 
 
-def build_metadata(book: epub.EpubBook, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_metadata(book: epub.EpubBook, items: list[ItemRecord]) -> Metadata:
     """Build complete metadata dictionary from EPUB book and extracted items."""
-    metadata: Dict[str, Any] = {
+    metadata: Metadata = {
         "identifier": first_meta(book.get_metadata("DC", "identifier")),
         "title": first_meta(book.get_metadata("DC", "title")),
         "language": first_meta(book.get_metadata("DC", "language")),
@@ -362,7 +372,7 @@ def build_metadata(book: epub.EpubBook, items: List[Dict[str, Any]]) -> Dict[str
     return metadata
 
 
-def dump_metadata(metadata: Dict[str, Any], out_dir: pathlib.Path) -> None:
+def dump_metadata(metadata: Metadata, out_dir: pathlib.Path) -> None:
     """Write metadata to metadata.json file."""
     metadata_path = out_dir / METADATA_FILENAME
     with metadata_path.open("w", encoding="utf-8") as fh:

@@ -7,7 +7,6 @@ import argparse
 import logging
 import pathlib
 import sys
-from typing import Any, Dict, List, Optional
 
 from ebooklib import epub
 
@@ -21,6 +20,7 @@ from build_epub import (
     run_epubcheck,
     create_item,
 )
+from epub_types import Metadata
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def normalized_translation_name(chapter_txt_path: pathlib.Path) -> str:
 
 def load_translation(
     translations_dir: pathlib.Path, chapter_txt_path: pathlib.Path
-) -> Optional[List[str]]:
+) -> list[str] | None:
     """Load translation file if it exists, returning lines or None if not found."""
     translation_file = translations_dir / normalized_translation_name(chapter_txt_path)
     if not translation_file.exists():
@@ -84,7 +84,7 @@ def load_translation(
     return content.splitlines()
 
 
-def apply_translation(original_text: str, translated_lines: List[str]) -> str:
+def apply_translation(original_text: str, translated_lines: list[str]) -> str:
     """Merge translated lines with original text, line-by-line."""
     original_lines = original_text.splitlines()
     if len(original_lines) != len(translated_lines):
@@ -103,13 +103,13 @@ def apply_translation(original_text: str, translated_lines: List[str]) -> str:
 
 def build_translated_chapters(  # pylint: disable=too-many-locals
     book: epub.EpubBook,
-    metadata: Dict[str, Any],
+    metadata: Metadata,
     base_dir: pathlib.Path,
     translations_dir: pathlib.Path,
     default_language: str,
-) -> Dict[str, epub.EpubHtml]:
+) -> dict[str, epub.EpubHtml]:
     """Build chapters with translations applied where available."""
-    chapters: Dict[str, epub.EpubHtml] = {}
+    chapters: dict[str, epub.EpubHtml] = {}
     for item in metadata.get("items", []):
         if item.get("type") != "document":
             continue
@@ -167,7 +167,7 @@ def build_translated_chapters(  # pylint: disable=too-many-locals
 
 def add_support_items(
     book: epub.EpubBook,
-    metadata: Dict[str, Any],
+    metadata: Metadata,
     base_dir: pathlib.Path,
     book_language: str,
 ) -> None:
